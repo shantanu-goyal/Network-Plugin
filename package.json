@@ -1,0 +1,19 @@
+{
+  "name": "lighthouse-plugin-network",
+  "version": "0.0.13",
+  "main": "./plugin.js",
+  "engines": {
+    "node": ">10"
+  },
+  "description": "Lighthouse plugin for network metrics",
+  "author": "Shantanu Goyal",
+  "license": "MIT",
+  "peerDependencies": {
+    "lighthouse": "^9.5.0",
+    "third-party-web": "^0.18.1"
+  },
+  "devDependencies": {
+    "lighthouse": "^9.5.0",
+    "lighthouse-plugin-network": "^0.0.13"
+  }
+}
