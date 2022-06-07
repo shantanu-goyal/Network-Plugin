@@ -1,6 +1,6 @@
 {
   "name": "lighthouse-plugin-network",
-  "version": "0.0.14",
+  "version": "0.0.19",
   "main": "./plugin.js",
   "engines": {
     "node": ">10"
@@ -14,6 +14,6 @@
   },
   "devDependencies": {
     "lighthouse": "^9.5.0",
-    "lighthouse-plugin-network": "^0.0.14"
+    "lighthouse-plugin-network": "^0.0.19"
   }
 }

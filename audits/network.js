@@ -4,6 +4,12 @@ const NetworkRecords = require('lighthouse/lighthouse-core/computed/network-reco
 const MainThreadTasks = require('lighthouse/lighthouse-core/computed/main-thread-tasks');
 const { getJavaScriptURLs, getAttributableURLForTask } = require('lighthouse/lighthouse-core/lib/tracehouse/task-summary');
 
+
+function validateUrl(value) {
+  return /^(?:(?:(?:https?|ftp):)?\/\/)(?:\S+(?::\S*)?@)?(?:(?!(?:10|127)(?:\.\d{1,3}){3})(?!(?:169\.254|192\.168)(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:[/?#]\S*)?$/i.test(value);
+}
+
+
 const UIStrings = {
   title: 'Minimize third-party usage',
   failureTitle: 'Reduce the impact of third-party code',
@@ -35,7 +41,7 @@ class ThirdPartySummary extends Audit {
   static getSummaries(networkRecords, mainThreadTasks, cpuMultiplier) {
     const byEntity = new Map();
     const defaultSummary = { mainThreadTime: 0, blockingTime: 0, transferSize: 0 };
-
+    const byURL = new Map();
     for (const request of networkRecords) {
       const urlSummary = byURL.get(request.url) || { ...defaultSummary };
       urlSummary.transferSize += request.transferSize;
@@ -55,7 +61,8 @@ class ThirdPartySummary extends Audit {
     }
     const urls = new Map();
     for (const [url, urlSummary] of byURL.entries()) {
-      const entity = new URL(url).host;
+      console.log(1, url);
+      const entity = validateUrl(url) ? new URL(url).host : 'other';
       const entitySummary = byEntity.get(entity) || { ...defaultSummary };
       entitySummary.transferSize += urlSummary.transferSize;
       entitySummary.mainThreadTime += urlSummary.mainThreadTime;
@@ -66,7 +73,7 @@ class ThirdPartySummary extends Audit {
       entityURLs.push(url);
       urls.set(entity, entityURLs);
     }
-    console.log("🚀 ~ file: network.js ~ line 72 ~ ThirdPartySummary ~ getSummaries ~  byURL, byEntity, urls ",  byURL, byEntity, urls )
+    console.log("🚀 ~ file: network.js ~ line 72 ~ ThirdPartySummary ~ getSummaries ~  byURL, byEntity, urls ", byURL, byEntity, urls)
     return { byURL, byEntity, urls };
   }
   static makeSubItems(entity, summaries, stats) {
@@ -110,7 +117,8 @@ class ThirdPartySummary extends Audit {
     const trace = artifacts.traces[Audit.DEFAULT_PASS];
     const devtoolsLog = artifacts.devtoolsLogs[Audit.DEFAULT_PASS];
     const networkRecords = await NetworkRecords.request(devtoolsLog, context);
-    const mainEntity = new URL(artifacts.URL.finalUrl).host;
+    var url = artifacts.URL.finalUrl;
+    const mainEntity = validateUrl(url) ? new URL(artifacts.URL.finalUrl).host : 'other';
     const tasks = await MainThreadTasks.request(trace, context);
     const multiplier = settings.throttlingMethod === 'simulate' ?
       settings.throttling.cpuSlowdownMultiplier : 1;
