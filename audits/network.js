@@ -1,6 +1,5 @@
 const Audit = require('lighthouse').Audit;
 const i18n = require('lighthouse/lighthouse-core/lib/i18n/i18n.js');
-const thirdPartyWeb = require('third-party-web');
 const NetworkRecords = require('lighthouse/lighthouse-core/computed/network-records');
 const MainThreadTasks = require('lighthouse/lighthouse-core/computed/main-thread-tasks');
 const { getJavaScriptURLs, getAttributableURLForTask } = require('lighthouse/lighthouse-core/lib/tracehouse/task-summary');
@@ -56,12 +55,7 @@ class ThirdPartySummary extends Audit {
     }
     const urls = new Map();
     for (const [url, urlSummary] of byURL.entries()) {
-      const entity = thirdPartyWeb.getEntity(url);
-      if (!entity) {
-        byURL.delete(url);
-        continue;
-      }
-
+      const entity = new URL(url).host;
       const entitySummary = byEntity.get(entity) || { ...defaultSummary };
       entitySummary.transferSize += urlSummary.transferSize;
       entitySummary.mainThreadTime += urlSummary.mainThreadTime;
@@ -72,7 +66,7 @@ class ThirdPartySummary extends Audit {
       entityURLs.push(url);
       urls.set(entity, entityURLs);
     }
-
+    console.log("🚀 ~ file: network.js ~ line 72 ~ ThirdPartySummary ~ getSummaries ~  byURL, byEntity, urls ",  byURL, byEntity, urls )
     return { byURL, byEntity, urls };
   }
   static makeSubItems(entity, summaries, stats) {
@@ -116,7 +110,7 @@ class ThirdPartySummary extends Audit {
     const trace = artifacts.traces[Audit.DEFAULT_PASS];
     const devtoolsLog = artifacts.devtoolsLogs[Audit.DEFAULT_PASS];
     const networkRecords = await NetworkRecords.request(devtoolsLog, context);
-    const mainEntity = thirdPartyWeb.getEntity(artifacts.URL.finalUrl);
+    const mainEntity = new URL(artifacts.URL.finalUrl).host;
     const tasks = await MainThreadTasks.request(trace, context);
     const multiplier = settings.throttlingMethod === 'simulate' ?
       settings.throttling.cpuSlowdownMultiplier : 1;
@@ -125,7 +119,7 @@ class ThirdPartySummary extends Audit {
     const overallSummary = { wastedBytes: 0, wastedMs: 0 };
 
     const results = Array.from(summaries.byEntity.entries())
-      .filter(([entity]) => !(mainEntity && mainEntity.name === entity.name))
+      .filter(([entity]) => !(mainEntity && mainEntity === entity))
       .map(([entity, stats]) => {
         overallSummary.wastedBytes += stats.transferSize;
         overallSummary.wastedMs += stats.blockingTime;
@@ -134,8 +128,8 @@ class ThirdPartySummary extends Audit {
           ...stats,
           entity: {
             type: ('link'),
-            text: entity.name,
-            url: entity.homepage || '',
+            text: entity,
+            url: entity || '',
           },
           subItems: {
             type: ('subitems'),
