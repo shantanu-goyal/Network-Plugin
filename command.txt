@@ -1,1 +1,1 @@
-npx --no-install lighthouse http://localhost:3000 --plugins=lighthouse-plugin-network --view
+npx --no-install lighthouse https://www.linkedin.com/feed --plugins=lighthouse-plugin-network --view
