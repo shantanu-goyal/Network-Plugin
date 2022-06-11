@@ -1,10 +1,12 @@
 module.exports = {
-  audits: [{
-    path: 'lighthouse-plugin-network/audits/network.js'
-  }],
+  audits: [
+    {
+      path: "lighthouse-plugin-network/audits/network.js",
+    },
+  ],
   category: {
     title: "Network",
     description: "Logs all network request",
-    auditRefs: [{ id: 'third-party-summary', weight: 1 }]
-  }
+    auditRefs: [{ id: "third-party-summary", weight: 1 }],
+  },
 };

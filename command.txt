@@ -1,1 +1,0 @@
-npx --no-install lighthouse https://www.linkedin.com/feed --plugins=lighthouse-plugin-network --view

@@ -1,0 +1,1 @@
+npx --no-install lighthouse https://www.sprinklr.com --plugins=lighthouse-plugin-network --view

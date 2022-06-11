@@ -1,46 +1,106 @@
-const Audit = require('lighthouse').Audit;
-const i18n = require('lighthouse/lighthouse-core/lib/i18n/i18n.js');
-const NetworkRecords = require('lighthouse/lighthouse-core/computed/network-records');
-const MainThreadTasks = require('lighthouse/lighthouse-core/computed/main-thread-tasks');
-const { getJavaScriptURLs, getAttributableURLForTask } = require('lighthouse/lighthouse-core/lib/tracehouse/task-summary');
+const Audit = require("lighthouse").Audit;
+const i18n = require("lighthouse/lighthouse-core/lib/i18n/i18n.js");
+const NetworkRecords = require("lighthouse/lighthouse-core/computed/network-records");
+const MainThreadTasks = require("lighthouse/lighthouse-core/computed/main-thread-tasks");
+const {
+  getJavaScriptURLs,
+  getAttributableURLForTask,
+} = require("lighthouse/lighthouse-core/lib/tracehouse/task-summary");
 
-
-function validateUrl(value) {
-  return /^(?:(?:(?:https?|ftp):)?\/\/)(?:\S+(?::\S*)?@)?(?:(?!(?:10|127)(?:\.\d{1,3}){3})(?!(?:169\.254|192\.168)(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:[/?#]\S*)?$/i.test(value);
+/**
+ *
+ * @param {String} url
+ * @returns {Boolean}
+ */
+function validateUrl(url) {
+  return /^(?:(?:(?:https?|ftp):)?\/\/)(?:\S+(?::\S*)?@)?(?:(?!(?:10|127)(?:\.\d{1,3}){3})(?!(?:169\.254|192\.168)(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:[/?#]\S*)?$/i.test(
+    url
+  );
 }
 
-
 const UIStrings = {
-  title: 'Minimize third-party usage',
-  failureTitle: 'Reduce the impact of third-party code',
-  description: 'Third-party code can significantly impact load performance. ' +
-    'Limit the number of redundant third-party providers and try to load third-party code after ' +
-    'your page has primarily finished loading. [Learn more](https://developers.google.com/web/fundamentals/performance/optimizing-content-efficiency/loading-third-party-javascript/).',
-
-  columnThirdParty: 'Third-Party',
-  displayValue: 'Third-party code blocked the main thread for ' +
+  /** Title of a diagnostic audit that provides details about the code on a web page that the user doesn't control (referred to as "third-party code"). This descriptive title is shown to users when the amount is acceptable and no user action is required. */
+  title: "Minimize third-party usage",
+  /** Title of a diagnostic audit that provides details about the code on a web page that the user doesn't control (referred to as "third-party code"). This imperative title is shown to users when there is a significant amount of page execution time caused by third-party code that should be reduced. */
+  failureTitle: "Reduce the impact of third-party code",
+  /** Description of a Lighthouse audit that identifies the code on the page that the user doesn't control. This is displayed after a user expands the section to see more. No character length limits. 'Learn More' becomes link text to additional documentation. */
+  description:
+    "Third-party code can significantly impact load performance. " +
+    "Limit the number of redundant third-party providers and try to load third-party code after " +
+    "your page has primarily finished loading. [Learn more](https://developers.google.com/web/fundamentals/performance/optimizing-content-efficiency/loading-third-party-javascript/).",
+  /** Label for a table column that displays the name of a third-party provider that potentially links to their website. */
+  columnThirdParty: "Third-Party",
+  /** Summary text for the result of a Lighthouse audit that identifies the code on a web page that the user doesn't control (referred to as "third-party code"). This text summarizes the number of distinct entities that were found on the page. */
+  displayValue:
+    "Third-party code blocked the main thread for " +
     `{timeInMs, number, milliseconds}\xa0ms`,
 };
-
 const str_ = i18n.createMessageInstanceIdFn(__filename, UIStrings);
+
+// A page passes when all third-party code blocks for less than 250 ms.
 const PASS_THRESHOLD_IN_MS = 250;
+
+/** @typedef {import("third-party-web").IEntity} ThirdPartyEntity */
+
+/**
+ * @typedef Summary
+ * @property {number} mainThreadTime
+ * @property {number} transferSize
+ * @property {number} blockingTime
+ */
+
+/**
+ * @typedef URLSummary
+ * @property {number} transferSize
+ * @property {number} blockingTime
+ * @property {string | LH.IcuMessage} url
+ */
+
+/** @typedef SummaryMaps
+ * @property {Map<ThirdPartyEntity, Summary>} byEntity Map of impact summaries for each entity.
+ * @property {Map<string, Summary>} byURL Map of impact summaries for each URL.
+ * @property {Map<ThirdPartyEntity, string[]>} urls Map of URLs under each entity.
+ */
+
+/**
+ * Don't bother showing resources smaller than 4KiB since they're likely to be pixels, which isn't
+ * too actionable.
+ */
 const MIN_TRANSFER_SIZE_FOR_SUBITEMS = 4096;
 
-const MAX_SUBITEMS = 100;
+/** Show at most 5 sub items in the resource breakdown. */
+const MAX_SUBITEMS = 10;
 
 class ThirdPartySummary extends Audit {
+  /**
+   * @return {LH.Audit.Meta}
+   */
   static get meta() {
     return {
-      id: 'third-party-summary',
+      id: "third-party-summary",
       title: str_(UIStrings.title),
       failureTitle: str_(UIStrings.failureTitle),
       description: str_(UIStrings.description),
-      requiredArtifacts: ['traces', 'devtoolsLogs', 'URL'],
+      requiredArtifacts: ["traces", "devtoolsLogs", "URL"],
     };
   }
+
+  /**
+   *
+   * @param {Array<LH.Artifacts.NetworkRequest>} networkRecords
+   * @param {Array<LH.Artifacts.TaskNode>} mainThreadTasks
+   * @param {number} cpuMultiplier
+   * @return {SummaryMaps}
+   */
   static getSummaries(networkRecords, mainThreadTasks, cpuMultiplier) {
+    /** @type {Map<ThirdPartyEntity, Summary>} */
     const byEntity = new Map();
-    const defaultSummary = { mainThreadTime: 0, blockingTime: 0, transferSize: 0 };
+    const defaultSummary = {
+      mainThreadTime: 0,
+      blockingTime: 0,
+      transferSize: 0,
+    };
+    /** @type {Map<string, Summary>} */
     const byURL = new Map();
     for (const request of networkRecords) {
       const urlSummary = byURL.get(request.url) || { ...defaultSummary };
@@ -55,14 +115,19 @@ class ThirdPartySummary extends Audit {
 
       const urlSummary = byURL.get(attributableURL) || { ...defaultSummary };
       const taskDuration = task.selfTime * cpuMultiplier;
+      // The amount of time spent on main thread is the sum of all durations.
       urlSummary.mainThreadTime += taskDuration;
+      // The amount of time spent *blocking* on main thread is the sum of all time longer than 50ms.
+      // Note that this is not totally equivalent to the TBT definition since it fails to account for FCP,
+      // but a majority of third-party work occurs after FCP and should yield largely similar numbers.
       urlSummary.blockingTime += Math.max(taskDuration - 50, 0);
       byURL.set(attributableURL, urlSummary);
     }
+    // Map each URL's stat to a particular third party entity.
+    /** @type {Map<ThirdPartyEntity, string[]>} */
     const urls = new Map();
     for (const [url, urlSummary] of byURL.entries()) {
-      console.log(1, url);
-      const entity = validateUrl(url) ? new URL(url).host : 'other';
+      const entity = validateUrl(url) ? new URL(url).host : "other";
       const entitySummary = byEntity.get(entity) || { ...defaultSummary };
       entitySummary.transferSize += urlSummary.transferSize;
       entitySummary.mainThreadTime += urlSummary.mainThreadTime;
@@ -73,23 +138,45 @@ class ThirdPartySummary extends Audit {
       entityURLs.push(url);
       urls.set(entity, entityURLs);
     }
-    console.log("🚀 ~ file: network.js ~ line 72 ~ ThirdPartySummary ~ getSummaries ~  byURL, byEntity, urls ", byURL, byEntity, urls)
     return { byURL, byEntity, urls };
   }
+
+  /**
+   * @param {ThirdPartyEntity} entity
+   * @param {SummaryMaps} summaries
+   * @param {Summary} stats
+   * @return {Array<URLSummary>}
+   */
   static makeSubItems(entity, summaries, stats) {
     const entityURLs = summaries.urls.get(entity) || [];
     let items = entityURLs
-      .map(url => ({ url, ...summaries.byURL.get(url) }))
+      .map(
+        (url) =>
+          /** @type {URLSummary} */ ({ url, ...summaries.byURL.get(url) })
+      )
+      // Filter out any cases where byURL was missing entries.
       .filter((stat) => stat.transferSize > 0)
-      .sort((a, b) => (b.blockingTime - a.blockingTime) || (b.transferSize - a.transferSize));
+      // Sort by blocking time first, then transfer size to break ties.
+      .sort(
+        (a, b) =>
+          b.blockingTime - a.blockingTime || b.transferSize - a.transferSize
+      );
 
     const subitemSummary = { transferSize: 0, blockingTime: 0 };
-    const minTransferSize = Math.max(MIN_TRANSFER_SIZE_FOR_SUBITEMS, stats.transferSize / 20);
+    const minTransferSize = Math.max(
+      MIN_TRANSFER_SIZE_FOR_SUBITEMS,
+      stats.transferSize / 20
+    );
     const maxSubItems = Math.min(MAX_SUBITEMS, items.length);
     let numSubItems = 0;
     while (numSubItems < maxSubItems) {
       const nextSubItem = items[numSubItems];
-      if (nextSubItem.blockingTime === 0 && nextSubItem.transferSize < minTransferSize) {
+      if (
+        nextSubItem.blockingTime === 0 &&
+        nextSubItem.transferSize < minTransferSize
+      ) {
+        // Don't include the resource in the sub-item breakdown because it didn't have a big
+        // enough impact on its own.
         break;
       }
 
@@ -98,8 +185,11 @@ class ThirdPartySummary extends Audit {
       subitemSummary.blockingTime += nextSubItem.blockingTime;
     }
     if (!subitemSummary.blockingTime && !subitemSummary.transferSize) {
+      // Don't bother breaking down if there are no large resources.
       return [];
     }
+    // Only show the top N entries for brevity. If there is more than one remaining entry
+    // we'll replace the tail entries with single remainder entry.
     items = items.slice(0, numSubItems);
     const remainder = {
       url: str_(i18n.UIStrings.otherResourcesLabel),
@@ -112,21 +202,36 @@ class ThirdPartySummary extends Audit {
     return items;
   }
 
+  /**
+   * @param {LH.Artifacts} artifacts
+   * @param {LH.Audit.Context} context
+   * @return {Promise<LH.Audit.Product>}
+   */
   static async audit(artifacts, context) {
     const settings = context.settings || {};
     const trace = artifacts.traces[Audit.DEFAULT_PASS];
     const devtoolsLog = artifacts.devtoolsLogs[Audit.DEFAULT_PASS];
     const networkRecords = await NetworkRecords.request(devtoolsLog, context);
     var url = artifacts.URL.finalUrl;
-    const mainEntity = validateUrl(url) ? new URL(artifacts.URL.finalUrl).host : 'other';
+    const mainEntity = validateUrl(url)
+      ? new URL(artifacts.URL.finalUrl).host
+      : "other";
     const tasks = await MainThreadTasks.request(trace, context);
-    const multiplier = settings.throttlingMethod === 'simulate' ?
-      settings.throttling.cpuSlowdownMultiplier : 1;
+    const multiplier =
+      settings.throttlingMethod === "simulate"
+        ? settings.throttling.cpuSlowdownMultiplier
+        : 1;
 
-    const summaries = ThirdPartySummary.getSummaries(networkRecords, tasks, multiplier);
+    const summaries = ThirdPartySummary.getSummaries(
+      networkRecords,
+      tasks,
+      multiplier
+    );
     const overallSummary = { wastedBytes: 0, wastedMs: 0 };
 
     const results = Array.from(summaries.byEntity.entries())
+      // Don't consider the domain we're on to be third-party.
+      // e.g. Facebook SDK isn't a third-party script on facebook.com
       .filter(([entity]) => !(mainEntity && mainEntity === entity))
       .map(([entity, stats]) => {
         overallSummary.wastedBytes += stats.transferSize;
@@ -135,22 +240,46 @@ class ThirdPartySummary extends Audit {
         return {
           ...stats,
           entity: {
-            type: ('link'),
+            type: /** @type {const} */ "link",
             text: entity,
-            url: entity || '',
+            url: entity || "",
           },
           subItems: {
-            type: ('subitems'),
+            type: /** @type {const} */ "subitems",
             items: ThirdPartySummary.makeSubItems(entity, summaries, stats),
           },
         };
       })
-      .sort((a, b) => (b.blockingTime - a.blockingTime) || (b.transferSize - a.transferSize));
+      // Sort by blocking time first, then transfer size to break ties.
+      .sort(
+        (a, b) =>
+          b.blockingTime - a.blockingTime || b.transferSize - a.transferSize
+      );
 
+    /** @type {LH.Audit.Details.Table['headings']} */
     const headings = [
-      { key: 'entity', itemType: 'link', text: str_(UIStrings.columnThirdParty), subItemsHeading: { key: 'url', itemType: 'url' } },
-      { key: 'transferSize', granularity: 1, itemType: 'bytes', text: str_(i18n.UIStrings.columnTransferSize), subItemsHeading: { key: 'transferSize' } },
-      { key: 'blockingTime', granularity: 1, itemType: 'ms', text: str_(i18n.UIStrings.columnBlockingTime), subItemsHeading: { key: 'blockingTime' } },
+      /* eslint-disable max-len */
+      {
+        key: "entity",
+        itemType: "link",
+        text: str_(UIStrings.columnThirdParty),
+        subItemsHeading: { key: "url", itemType: "url" },
+      },
+      {
+        key: "transferSize",
+        granularity: 1,
+        itemType: "bytes",
+        text: str_(i18n.UIStrings.columnTransferSize),
+        subItemsHeading: { key: "transferSize" },
+      },
+      {
+        key: "blockingTime",
+        granularity: 1,
+        itemType: "ms",
+        text: str_(i18n.UIStrings.columnBlockingTime),
+        subItemsHeading: { key: "blockingTime" },
+      },
+      /* eslint-enable max-len */
     ];
 
     if (!results.length) {
@@ -169,9 +298,6 @@ class ThirdPartySummary extends Audit {
     };
   }
 }
-
-
-
 
 module.exports = ThirdPartySummary;
 module.exports.UIStrings = UIStrings;
